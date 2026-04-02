@@ -1,20 +1,20 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   PanResponder,
-  Animated,
 } from 'react-native';
 import { useDrag } from '../context/DragContext';
-import { useBook } from '../context/BookContext';
+import { useProject } from '../context/ProjectContext';
+import { PLOT_COLORS, ColorKey } from '../constants';
 
 export default function DragOverlay() {
   const {
-    isDraggingBeat,
-    isDraggingChapter,
-    draggingBeat,
-    draggingChapter,
+    isDragging,
+    dragType,
+    dragId,
+    dragContent,
     dragX,
     dragY,
     updateDrag,
@@ -22,8 +22,7 @@ export default function DragOverlay() {
     cancelDrag,
   } = useDrag();
 
-  const { chapters } = useBook();
-  const isActive = isDraggingBeat || isDraggingChapter;
+  const { plots } = useProject();
 
   const panResponder = useRef(
     PanResponder.create({
@@ -41,15 +40,18 @@ export default function DragOverlay() {
     })
   ).current;
 
-  if (!isActive) return null;
+  if (!isDragging) return null;
 
-  const cardWidth = 188;
+  const cardWidth = 200;
   const cardLeft = dragX - cardWidth / 2;
-  const cardTop = dragY - 35;
+  const cardTop = dragY - 30;
 
-  if (isDraggingBeat && draggingBeat) {
-    const chapter = chapters.find((c) => c.id === draggingBeat.chapterId);
-    const color = chapter?.color ?? '#6c63ff';
+  if (dragType === 'beat' && dragContent) {
+    const beat = dragContent;
+    const plot = plots.find((p) => p.id === beat.plotId);
+    const colorKey = plot?.color as ColorKey | undefined;
+    const colors = colorKey && PLOT_COLORS[colorKey] ? PLOT_COLORS[colorKey] : null;
+    const borderColor = colors?.text ?? '#eab308';
 
     return (
       <View
@@ -63,20 +65,21 @@ export default function DragOverlay() {
             {
               left: cardLeft,
               top: cardTop,
-              borderLeftColor: color,
+              borderLeftColor: borderColor,
+              backgroundColor: colors ? colors.dim : 'rgba(234,179,8,0.1)',
               width: cardWidth,
             },
           ]}
         >
           <Text style={styles.floatingText} numberOfLines={2}>
-            {draggingBeat.summary}
+            {beat.summary}
           </Text>
         </View>
       </View>
     );
   }
 
-  if (isDraggingChapter && draggingChapter) {
+  if (dragType === 'chapter' && dragContent) {
     return (
       <View
         style={StyleSheet.absoluteFillObject}
@@ -85,17 +88,48 @@ export default function DragOverlay() {
       >
         <View
           style={[
-            styles.floatingHeader,
+            styles.floatingPill,
             {
               left: cardLeft,
-              top: cardTop - 10,
-              borderTopColor: draggingChapter.color,
+              top: cardTop,
               width: cardWidth,
             },
           ]}
         >
-          <Text style={styles.floatingTitle} numberOfLines={1}>
-            {draggingChapter.title}
+          <Text style={styles.floatingPillText} numberOfLines={1}>
+            {dragContent.title}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (dragType === 'plot' && dragContent) {
+    const plot = dragContent;
+    const colorKey = plot?.color as ColorKey | undefined;
+    const colors = colorKey && PLOT_COLORS[colorKey] ? PLOT_COLORS[colorKey] : null;
+
+    return (
+      <View
+        style={StyleSheet.absoluteFillObject}
+        {...panResponder.panHandlers}
+        pointerEvents="box-only"
+      >
+        <View
+          style={[
+            styles.floatingPill,
+            {
+              left: cardLeft,
+              top: cardTop,
+              width: cardWidth,
+              borderColor: colors?.text ?? '#eab308',
+              borderWidth: 2,
+            },
+          ]}
+        >
+          <View style={[styles.plotDot, { backgroundColor: colors?.bg ?? '#eab308' }]} />
+          <Text style={styles.floatingPillText} numberOfLines={1}>
+            {dragContent.title}
           </Text>
         </View>
       </View>
@@ -108,17 +142,16 @@ export default function DragOverlay() {
 const styles = StyleSheet.create({
   floatingCard: {
     position: 'absolute',
-    backgroundColor: '#3a3a3c',
     borderRadius: 8,
     padding: 10,
     borderLeftWidth: 3,
-    minHeight: 60,
+    minHeight: 56,
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 12,
     transform: [{ scale: 1.05 }],
   },
   floatingText: {
@@ -126,22 +159,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  floatingHeader: {
+  floatingPill: {
     position: 'absolute',
-    backgroundColor: '#303030',
-    borderRadius: 8,
-    padding: 12,
-    borderTopWidth: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2a2a3a',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 12,
     transform: [{ scale: 1.05 }],
+    gap: 8,
   },
-  floatingTitle: {
+  floatingPillText: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
+    flex: 1,
+  },
+  plotDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
 });
