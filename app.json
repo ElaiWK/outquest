@@ -9,7 +9,10 @@
       "resizeMode": "contain",
       "backgroundColor": "#121212"
     },
-    "platforms": ["ios", "android"],
+    "platforms": ["ios", "android", "web"],
+    "experiments": {
+      "baseUrl": "/outquest"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.outquest.app"
