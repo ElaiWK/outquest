@@ -1,28 +1,36 @@
 export interface Beat {
   id: string;
   chapterId: string;
-  order: number;
+  plotId: string;
   summary: string;
   description: string;
-  createdAt: number;
-  updatedAt: number;
+  order: number;
 }
 
 export interface Chapter {
   id: string;
   title: string;
-  order: number;
+  status: 'published' | 'draft';
+}
+
+export interface Plot {
+  id: string;
+  title: string;
   color: string;
 }
 
-export interface LayoutRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+export interface Project {
+  id: string;
+  title: string;
+  lastUpdated: number;
+  chapters: Chapter[];
+  plots: Plot[];
+  beats: Beat[];
 }
 
+export type ViewMode = 'timeline' | 'vertical' | 'board' | 'inbox';
+
 export type RootStackParamList = {
-  Timeline: undefined;
-  BeatDetail: { beatId: string };
+  Dashboard: undefined;
+  Editor: { projectId: string };
 };
