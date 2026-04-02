@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,25 +19,24 @@ import BeatEditModal from '../components/BeatEditModal';
 import PlotEditModal from '../components/PlotEditModal';
 import DragOverlay from '../components/DragOverlay';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Editor'> & {
-  navigation: any;
-};
+type Props = NativeStackScreenProps<RootStackParamList, 'Editor'> & { navigation: any };
 
-const MIN_SCALE = 0.4;
+const MIN_SCALE = 0.35;
 const MAX_SCALE = 2.0;
 const SCALE_STEP = 0.1;
 
+const VIEW_MODES: Array<{ key: ViewMode; icon: string }> = [
+  { key: 'timeline', icon: '⊞' },
+  { key: 'vertical', icon: '☰' },
+  { key: 'board',    icon: '⬜' },
+  { key: 'inbox',    icon: '◫' },
+];
+
 export default function EditorScreen({ navigation }: Props) {
   const {
-    title,
-    setTitle,
-    plots,
-    plotFilter,
-    setPlotFilter,
-    addPlot,
-    addChapter,
-    publishedChapters,
-    draftChapters,
+    title, setTitle,
+    plots, plotFilter, setPlotFilter,
+    addPlot, addChapter,
   } = useProject();
 
   const [viewMode, setViewMode] = useState<ViewMode>('timeline');
@@ -45,36 +44,59 @@ export default function EditorScreen({ navigation }: Props) {
   const [editingBeatId, setEditingBeatId] = useState<string | null>(null);
   const [editingPlotId, setEditingPlotId] = useState<string | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
-  const [showPlotFilter, setShowPlotFilter] = useState(false);
+  const [showFilter, setShowFilter] = useState(false);
 
-  const handleZoomIn = () => setScale((s) => Math.min(MAX_SCALE, +(s + SCALE_STEP).toFixed(1)));
-  const handleZoomOut = () => setScale((s) => Math.max(MIN_SCALE, +(s - SCALE_STEP).toFixed(1)));
-  const zoomPercent = Math.round(scale * 100);
+  const scaleRef = useRef(scale);
+  useEffect(() => { scaleRef.current = scale; }, [scale]);
 
-  const handleEditBeat = useCallback((beatId: string) => {
-    setEditingBeatId(beatId);
-  }, []);
+  // Pinch-to-zoom (works in web browser)
+  const gridRef = useRef<View>(null);
+  useEffect(() => {
+    if (viewMode === 'inbox') return;
+    const el = gridRef.current as any;
+    if (!el?.addEventListener) return;
 
-  const handleEditPlot = useCallback((plotId: string) => {
-    setEditingPlotId(plotId);
-  }, []);
+    let initDist = 0;
+    let initScale = 1;
 
-  const closeBeatModal = useCallback(() => setEditingBeatId(null), []);
-  const closePlotModal = useCallback(() => setEditingPlotId(null), []);
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        initDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initScale = scaleRef.current;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, initScale * (dist / initDist)));
+        setScale(parseFloat(next.toFixed(2)));
+      }
+    };
 
-  const viewModes: Array<{ key: ViewMode; label: string; icon: string }> = [
-    { key: 'timeline', label: 'Timeline', icon: '⬛' },
-    { key: 'vertical', label: 'Vertical', icon: '☰' },
-    { key: 'board', label: 'Board', icon: '⬜' },
-    { key: 'inbox', label: 'Inbox', icon: '◫' },
-  ];
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [viewMode]);
 
-  const showZoom = viewMode !== 'inbox';
+  const filterLabel = plotFilter === 'all'
+    ? 'All Tracks'
+    : (plots.find(p => p.id === plotFilter)?.title ?? 'Track');
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        {/* Header */}
+
+        {/* ── Single compact header row ── */}
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Text style={styles.backBtnText}>‹</Text>
@@ -91,139 +113,94 @@ export default function EditorScreen({ navigation }: Props) {
             />
           ) : (
             <Pressable onPress={() => setTitleEditing(true)} style={styles.titleBtn}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {title}
-              </Text>
+              <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
             </Pressable>
           )}
 
-          <View style={styles.headerRight}>
-            {/* Plot filter */}
-            <Pressable
-              style={[styles.filterBtn, showPlotFilter && styles.filterBtnActive]}
-              onPress={() => setShowPlotFilter((v) => !v)}
-            >
-              <Text style={[styles.filterBtnText, showPlotFilter && styles.filterBtnTextActive]}>
-                {plotFilter === 'all'
-                  ? 'All Tracks'
-                  : plots.find((p) => p.id === plotFilter)?.title ?? 'Track'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Plot filter dropdown */}
-        {showPlotFilter && (
-          <View style={styles.filterDropdown}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterOptions}>
+          {/* View mode pill */}
+          <View style={styles.modePill}>
+            {VIEW_MODES.map(vm => (
               <Pressable
-                style={[styles.filterOption, plotFilter === 'all' && styles.filterOptionActive]}
-                onPress={() => { setPlotFilter('all'); setShowPlotFilter(false); }}
+                key={vm.key}
+                style={[styles.modeTab, viewMode === vm.key && styles.modeTabActive]}
+                onPress={() => setViewMode(vm.key)}
               >
-                <Text style={[styles.filterOptionText, plotFilter === 'all' && styles.filterOptionTextActive]}>
-                  All Tracks
+                <Text style={[styles.modeIcon, viewMode === vm.key && styles.modeIconActive]}>
+                  {vm.icon}
                 </Text>
               </Pressable>
-              {plots.map((p) => (
+            ))}
+          </View>
+
+          {/* Filter button */}
+          <Pressable
+            style={[styles.filterBtn, showFilter && styles.filterBtnActive]}
+            onPress={() => setShowFilter(v => !v)}
+          >
+            <Text style={[styles.filterText, showFilter && styles.filterTextActive]} numberOfLines={1}>
+              {filterLabel.length > 8 ? filterLabel.slice(0, 8) + '…' : filterLabel}
+            </Text>
+          </Pressable>
+
+          {/* Add chapter / draft */}
+          <Pressable style={styles.addBtn} onPress={viewMode === 'inbox' ? addPlot : addChapter}>
+            <Text style={styles.addBtnText}>+</Text>
+          </Pressable>
+        </View>
+
+        {/* Filter dropdown */}
+        {showFilter && (
+          <View style={styles.filterDropdown}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+              {[{ id: 'all', title: 'All Tracks' }, ...plots].map(p => (
                 <Pressable
                   key={p.id}
-                  style={[styles.filterOption, plotFilter === p.id && styles.filterOptionActive]}
-                  onPress={() => { setPlotFilter(p.id); setShowPlotFilter(false); }}
+                  style={[styles.filterChip, plotFilter === p.id && styles.filterChipActive]}
+                  onPress={() => { setPlotFilter(p.id); setShowFilter(false); }}
                 >
-                  <Text style={[styles.filterOptionText, plotFilter === p.id && styles.filterOptionTextActive]}>
+                  <Text style={[styles.filterChipText, plotFilter === p.id && styles.filterChipTextActive]}>
                     {p.title}
                   </Text>
                 </Pressable>
               ))}
+              <Pressable style={styles.filterChip} onPress={() => { addPlot(); setShowFilter(false); }}>
+                <Text style={styles.addTrackText}>+ Track</Text>
+              </Pressable>
             </ScrollView>
           </View>
         )}
 
-        {/* View tabs */}
-        <View style={styles.tabs}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabsContent}
-          >
-            {viewModes.map((vm) => (
-              <Pressable
-                key={vm.key}
-                style={[styles.tab, viewMode === vm.key && styles.tabActive]}
-                onPress={() => setViewMode(vm.key)}
-              >
-                <Text style={[styles.tabText, viewMode === vm.key && styles.tabTextActive]}>
-                  {vm.label}
-                </Text>
-              </Pressable>
-            ))}
-
-            <View style={styles.tabSeparator} />
-
-            <Pressable style={styles.actionBtn} onPress={addPlot}>
-              <Text style={styles.actionBtnText}>+ Track</Text>
-            </Pressable>
-
-            {viewMode !== 'inbox' && (
-              <Pressable style={styles.actionBtn} onPress={addChapter}>
-                <Text style={styles.actionBtnText}>+ Chapter</Text>
-              </Pressable>
-            )}
-
-            {viewMode === 'inbox' && (
-              <View style={styles.inboxCount}>
-                <Text style={styles.inboxCountText}>
-                  {draftChapters.length} draft{draftChapters.length !== 1 ? 's' : ''}
-                </Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
-
         {/* Main view */}
-        <View style={styles.viewContainer}>
+        <View ref={gridRef} style={styles.viewContainer}>
           {viewMode === 'timeline' && (
-            <TimelineView
-              scale={scale}
-              onEditBeat={handleEditBeat}
-              onEditPlot={handleEditPlot}
-            />
+            <TimelineView scale={scale} onEditBeat={setEditingBeatId} onEditPlot={setEditingPlotId} />
           )}
           {viewMode === 'vertical' && (
-            <VerticalView
-              scale={scale}
-              onEditBeat={handleEditBeat}
-              onEditPlot={handleEditPlot}
-            />
+            <VerticalView scale={scale} onEditBeat={setEditingBeatId} onEditPlot={setEditingPlotId} />
           )}
           {viewMode === 'board' && (
-            <BoardView onEditBeat={handleEditBeat} />
+            <BoardView onEditBeat={setEditingBeatId} />
           )}
           {viewMode === 'inbox' && (
-            <InboxView onEditBeat={handleEditBeat} />
+            <InboxView onEditBeat={setEditingBeatId} />
           )}
         </View>
 
-        {/* Zoom controls */}
-        {showZoom && (
-          <View style={styles.zoomControls}>
-            <Pressable style={styles.zoomBtn} onPress={handleZoomOut}>
+        {/* Zoom controls (bottom-right, hidden in inbox) */}
+        {viewMode !== 'inbox' && (
+          <View style={styles.zoom}>
+            <Pressable style={styles.zoomBtn} onPress={() => setScale(s => Math.max(MIN_SCALE, +(s - SCALE_STEP).toFixed(1)))}>
               <Text style={styles.zoomBtnText}>−</Text>
             </Pressable>
-            <View style={styles.zoomValue}>
-              <Text style={styles.zoomValueText}>{zoomPercent}%</Text>
-            </View>
-            <Pressable style={styles.zoomBtn} onPress={handleZoomIn}>
+            <Text style={styles.zoomLabel}>{Math.round(scale * 100)}%</Text>
+            <Pressable style={styles.zoomBtn} onPress={() => setScale(s => Math.min(MAX_SCALE, +(s + SCALE_STEP).toFixed(1)))}>
               <Text style={styles.zoomBtnText}>+</Text>
             </Pressable>
           </View>
         )}
 
-        {/* Modals */}
-        <BeatEditModal beatId={editingBeatId} onClose={closeBeatModal} />
-        <PlotEditModal plotId={editingPlotId} onClose={closePlotModal} />
-
-        {/* Drag overlay — always on top */}
+        <BeatEditModal beatId={editingBeatId} onClose={() => setEditingBeatId(null)} />
+        <PlotEditModal plotId={editingPlotId} onClose={() => setEditingPlotId(null)} />
         <DragOverlay />
       </View>
     </SafeAreaView>
@@ -231,216 +208,132 @@ export default function EditorScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#0f0f13',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#0f0f13',
-  },
+  safeArea: { flex: 1, backgroundColor: '#0f0f13' },
+  container: { flex: 1, backgroundColor: '#0f0f13' },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     backgroundColor: '#13131a',
     borderBottomWidth: 1,
     borderBottomColor: '#2a2a35',
-    gap: 8,
+    gap: 6,
+    height: 48,
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 7,
     backgroundColor: '#2a2a35',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
   },
-  backBtnText: {
-    color: '#ffffff',
-    fontSize: 22,
-    lineHeight: 26,
-    fontWeight: '300',
-  },
-  titleBtn: {
-    flex: 1,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-  },
-  titleText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+  backBtnText: { color: '#fff', fontSize: 20, lineHeight: 24 },
+
+  titleBtn: { flex: 1, paddingVertical: 4, paddingHorizontal: 6 },
+  titleText: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
   titleInput: {
     flex: 1,
-    color: '#ffffff',
-    fontSize: 16,
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '700',
     backgroundColor: '#2a2a35',
     borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
-  },
-  filterBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 7,
-    backgroundColor: '#2a2a35',
-    borderWidth: 1,
-    borderColor: '#3a3a4a',
-  },
-  filterBtnActive: {
-    borderColor: '#eab308',
-    backgroundColor: 'rgba(234,179,8,0.1)',
-  },
-  filterBtnText: {
-    color: '#888899',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterBtnTextActive: {
-    color: '#eab308',
-  },
-  filterDropdown: {
-    backgroundColor: '#1e1e28',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a35',
-  },
-  filterOptions: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  filterOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 16,
-    backgroundColor: '#2a2a35',
-    borderWidth: 1,
-    borderColor: '#3a3a4a',
-  },
-  filterOptionActive: {
-    backgroundColor: '#eab308',
-    borderColor: '#eab308',
-  },
-  filterOptionText: {
-    color: '#aaaacc',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  filterOptionTextActive: {
-    color: '#000000',
-    fontWeight: '700',
-  },
-  tabs: {
-    backgroundColor: '#13131a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a35',
-  },
-  tabsContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    alignItems: 'center',
-  },
-  tab: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 7,
-    backgroundColor: 'transparent',
-  },
-  tabActive: {
-    backgroundColor: '#2a2a35',
-  },
-  tabText: {
-    color: '#666677',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  tabSeparator: {
-    width: 1,
-    height: 18,
-    backgroundColor: '#2a2a35',
-    marginHorizontal: 4,
-  },
-  actionBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 7,
-    backgroundColor: '#2a2a35',
-    borderWidth: 1,
-    borderColor: '#3a3a4a',
-  },
-  actionBtnText: {
-    color: '#eab308',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  inboxCount: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: '#2a2a35',
   },
-  inboxCountText: {
-    color: '#888899',
-    fontSize: 12,
-  },
-  viewContainer: {
-    flex: 1,
-    overflow: 'hidden',
-  },
-  zoomControls: {
-    position: 'absolute',
-    bottom: 20,
-    right: 16,
+
+  modePill: {
     flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#1e1e28',
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#2a2a35',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    flexShrink: 0,
   },
-  zoomBtn: {
-    width: 36,
-    height: 36,
+  modeTab: { paddingHorizontal: 7, paddingVertical: 5 },
+  modeTabActive: { backgroundColor: '#2a2a3f' },
+  modeIcon: { color: '#555566', fontSize: 13 },
+  modeIconActive: { color: '#eab308' },
+
+  filterBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 7,
+    backgroundColor: '#1e1e28',
+    borderWidth: 1,
+    borderColor: '#2a2a35',
+    flexShrink: 0,
+    maxWidth: 90,
+  },
+  filterBtnActive: { borderColor: '#eab308' },
+  filterText: { color: '#888899', fontSize: 11, fontWeight: '500' },
+  filterTextActive: { color: '#eab308' },
+
+  addBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 7,
+    backgroundColor: '#eab308',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  addBtnText: { color: '#000', fontSize: 20, lineHeight: 24, fontWeight: '700' },
+
+  filterDropdown: {
+    backgroundColor: '#13131a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a35',
+  },
+  filterRow: { paddingHorizontal: 10, paddingVertical: 8, gap: 6 },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
     backgroundColor: '#2a2a35',
+    borderWidth: 1,
+    borderColor: '#3a3a4a',
   },
-  zoomBtnText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '500',
+  filterChipActive: { backgroundColor: '#eab308', borderColor: '#eab308' },
+  filterChipText: { color: '#aaaacc', fontSize: 12, fontWeight: '500' },
+  filterChipTextActive: { color: '#000', fontWeight: '700' },
+  addTrackText: { color: '#eab308', fontSize: 12, fontWeight: '600' },
+
+  viewContainer: { flex: 1, overflow: 'hidden' },
+
+  zoom: {
+    position: 'absolute',
+    bottom: 16,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e1e28',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2a2a35',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 6,
   },
-  zoomValue: {
-    paddingHorizontal: 10,
+  zoomBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  zoomValueText: {
+  zoomBtnText: { color: '#fff', fontSize: 18, fontWeight: '400' },
+  zoomLabel: {
     color: '#aaaacc',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    minWidth: 38,
+    minWidth: 36,
     textAlign: 'center',
   },
 });

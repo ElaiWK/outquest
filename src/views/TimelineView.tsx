@@ -80,18 +80,14 @@ export default function TimelineView({ scale, onEditBeat, onEditPlot }: Props) {
               >
                 <Pressable
                   style={styles.plotLabelInner}
-                  onLongPress={() => {
-                    startDrag('plot', plot.id, plot, 0, 0);
-                  }}
+                  onLongPress={() => startDrag('plot', plot.id, plot, 0, 0)}
+                  onPress={() => onEditPlot(plot.id)}
                   delayLongPress={400}
                 >
                   <View style={[styles.plotColorDot, { backgroundColor: colors.bg }]} />
-                  <Text style={styles.plotLabelText} numberOfLines={2}>
+                  <Text style={styles.plotLabelText} numberOfLines={3}>
                     {plot.title}
                   </Text>
-                </Pressable>
-                <Pressable style={styles.gearBtn} onPress={() => onEditPlot(plot.id)}>
-                  <Text style={styles.gearBtnText}>⚙</Text>
                 </Pressable>
               </View>
             );
@@ -265,39 +261,29 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   plotLabelCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#2a2a35',
     borderLeftWidth: 3,
-    paddingLeft: 8,
-    paddingRight: 4,
-    gap: 6,
+    overflow: 'hidden',
   },
   plotLabelInner: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    padding: 8,
+    gap: 5,
   },
   plotColorDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    flexShrink: 0,
   },
   plotLabelText: {
     color: '#ccccdd',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
-    flex: 1,
-  },
-  gearBtn: {
-    padding: 4,
-  },
-  gearBtnText: {
-    color: '#666677',
-    fontSize: 14,
+    lineHeight: 14,
   },
   gridArea: {
     flex: 1,

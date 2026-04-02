@@ -10,10 +10,10 @@ export type ColorKey = keyof typeof PLOT_COLORS;
 export const COLOR_KEYS = Object.keys(PLOT_COLORS) as ColorKey[];
 
 export const APP_ID = 'outquest-mobile-app';
-export const CELL_WIDTH = 220;
-export const CELL_HEIGHT = 160;
-export const PLOT_LABEL_WIDTH = 150;
-export const CHAPTER_HEADER_HEIGHT = 64;
+export const CELL_WIDTH = 200;
+export const CELL_HEIGHT = 140;
+export const PLOT_LABEL_WIDTH = 90;
+export const CHAPTER_HEADER_HEIGHT = 48;
 
 export const DEFAULT_PROJECT = {
   title: 'Untitled Story',
