@@ -1,10 +1,5 @@
 import React, { useRef, useCallback } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Beat, Plot } from '../types';
 import { PLOT_COLORS, ColorKey } from '../constants';
@@ -15,9 +10,10 @@ interface Props {
   plot?: Plot;
   onPress: () => void;
   showPlotLabel?: boolean;
+  scale?: number;
 }
 
-export default function BeatCard({ beat, plot, onPress, showPlotLabel = false }: Props) {
+export default function BeatCard({ beat, plot, onPress, showPlotLabel = false, scale = 1 }: Props) {
   const ref = useRef<View>(null);
   const { registerBeatRef, startDrag, dragId, isDragging } = useDrag();
 
@@ -37,75 +33,70 @@ export default function BeatCard({ beat, plot, onPress, showPlotLabel = false }:
     });
   }, [beat, startDrag]);
 
-  const isBeingDragged = isDragging && dragId === beat.id;
-
+  const s = Math.max(0.35, scale);
   const colorKey = plot?.color as ColorKey | undefined;
   const colors = colorKey && PLOT_COLORS[colorKey] ? PLOT_COLORS[colorKey] : null;
   const borderColor = colors?.text ?? '#555566';
+  const isBeingDragged = isDragging && dragId === beat.id;
 
   return (
     <Pressable onPress={onPress} onLongPress={handleLongPress} delayLongPress={400}>
       <View
         ref={setRef}
         style={[
-          styles.card,
-          { borderLeftColor: borderColor, backgroundColor: colors ? colors.dim : '#2c2c3a' },
-          isBeingDragged && styles.cardDragging,
+          {
+            borderRadius: Math.round(7 * s),
+            paddingHorizontal: Math.round(9 * s),
+            paddingVertical: Math.round(8 * s),
+            borderLeftWidth: Math.max(2, Math.round(3 * s)),
+            borderLeftColor: borderColor,
+            backgroundColor: colors ? colors.dim : '#1e1e2a',
+            minHeight: Math.round(48 * s),
+            justifyContent: 'center',
+            opacity: isBeingDragged ? 0.2 : 1,
+          },
         ]}
       >
-        {showPlotLabel && plot && (
-          <View style={[styles.plotTag, { backgroundColor: colors?.dim ?? 'transparent', borderColor: borderColor }]}>
-            <Text style={[styles.plotTagText, { color: borderColor }]} numberOfLines={1}>
+        {showPlotLabel && plot && colors && (
+          <View
+            style={{
+              alignSelf: 'flex-start',
+              borderRadius: Math.round(4 * s),
+              borderWidth: 1,
+              borderColor,
+              paddingHorizontal: Math.round(5 * s),
+              paddingVertical: Math.round(2 * s),
+              marginBottom: Math.round(5 * s),
+            }}
+          >
+            <Text style={{ color: borderColor, fontSize: Math.max(7, Math.round(10 * s)), fontWeight: '600' }} numberOfLines={1}>
               {plot.title}
             </Text>
           </View>
         )}
-        <Text style={styles.summary} numberOfLines={2}>
-          {beat.summary}
+        <Text
+          style={{
+            color: '#e8e8f0',
+            fontSize: Math.max(8, Math.round(12 * s)),
+            lineHeight: Math.max(12, Math.round(17 * s)),
+          }}
+          numberOfLines={3}
+        >
+          {beat.summary || 'New beat'}
         </Text>
         {beat.description.length > 0 && (
-          <View style={[styles.dot, { backgroundColor: borderColor }]} />
+          <View
+            style={{
+              width: Math.max(3, Math.round(5 * s)),
+              height: Math.max(3, Math.round(5 * s)),
+              borderRadius: 3,
+              marginTop: Math.round(4 * s),
+              alignSelf: 'flex-end',
+              backgroundColor: borderColor,
+            }}
+          />
         )}
       </View>
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    borderRadius: 8,
-    padding: 10,
-    marginVertical: 4,
-    marginHorizontal: 4,
-    borderLeftWidth: 3,
-    minHeight: 56,
-    justifyContent: 'center',
-  },
-  cardDragging: {
-    opacity: 0.2,
-  },
-  plotTag: {
-    alignSelf: 'flex-start',
-    borderRadius: 4,
-    borderWidth: 1,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    marginBottom: 5,
-  },
-  plotTagText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  summary: {
-    color: '#ffffff',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    marginTop: 5,
-    alignSelf: 'flex-end',
-  },
-});
