@@ -57,6 +57,11 @@ export function DragProvider({ children }: { children: ReactNode }) {
   const [dragY, setDragY] = useState(0);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
+  // Refs for synchronous access in endDrag
+  const dragTypeRef = useRef<'beat' | 'chapter' | 'plot' | null>(null);
+  const dragIdRef = useRef<string | null>(null);
+  const dropTargetRef = useRef<DropTarget | null>(null);
+
   const cellRefs = useRef(new Map<string, View>());
   const beatRefs = useRef(new Map<string, View>());
   const chapterRefs = useRef(new Map<string, View>());
@@ -90,7 +95,7 @@ export function DragProvider({ children }: { children: ReactNode }) {
 
   const measureView = (view: View): Promise<LayoutRect> =>
     new Promise((resolve) => {
-      view.measureInWindow((x, y, width, height) => {
+      view.measureInWindow((x: number, y: number, width: number, height: number) => {
         resolve({ x, y, width, height });
       });
     });
@@ -120,7 +125,6 @@ export function DragProvider({ children }: { children: ReactNode }) {
 
   const computeBeatDropTarget = useCallback(
     (absX: number, absY: number): DropTarget | null => {
-      // Find which cell we're over
       let targetChapterId: string | null = null;
       let targetPlotId: string | null = null;
 
@@ -131,15 +135,14 @@ export function DragProvider({ children }: { children: ReactNode }) {
           absY >= rect.y &&
           absY <= rect.y + rect.height
         ) {
-          const [cId, pId] = key.split('::');
-          targetChapterId = cId;
-          targetPlotId = pId;
+          const parts = key.split('::');
+          targetChapterId = parts[0];
+          targetPlotId = parts[1];
           break;
         }
       }
 
       if (!targetChapterId || !targetPlotId) {
-        // Fall back to closest cell by x
         let minDist = Infinity;
         for (const [key, rect] of cellRects.current) {
           const cx = rect.x + rect.width / 2;
@@ -147,16 +150,15 @@ export function DragProvider({ children }: { children: ReactNode }) {
           const dist = Math.sqrt((absX - cx) ** 2 + (absY - cy) ** 2);
           if (dist < minDist) {
             minDist = dist;
-            const [cId, pId] = key.split('::');
-            targetChapterId = cId;
-            targetPlotId = pId;
+            const parts = key.split('::');
+            targetChapterId = parts[0];
+            targetPlotId = parts[1];
           }
         }
       }
 
       if (!targetChapterId || !targetPlotId) return null;
 
-      // Find beat index within that cell
       const cellBeats = beats
         .filter((b) => b.chapterId === targetChapterId && b.plotId === targetPlotId)
         .sort((a, b) => a.order - b.order);
@@ -182,15 +184,13 @@ export function DragProvider({ children }: { children: ReactNode }) {
 
   const computeChapterDropTarget = useCallback(
     (absX: number): DropTarget | null => {
-      const publishedChs = chapters.filter((c) => c.status === 'published');
-      let insertIndex = publishedChs.length;
-
       const sortedRects: Array<{ id: string; rect: LayoutRect }> = [];
       for (const [id, rect] of chapterRects.current) {
         sortedRects.push({ id, rect });
       }
       sortedRects.sort((a, b) => a.rect.x - b.rect.x);
 
+      let insertIndex = sortedRects.length;
       for (let i = 0; i < sortedRects.length; i++) {
         const center = sortedRects[i].rect.x + sortedRects[i].rect.width / 2;
         if (absX < center) {
@@ -201,19 +201,18 @@ export function DragProvider({ children }: { children: ReactNode }) {
 
       return { type: 'chapter', index: insertIndex };
     },
-    [chapters]
+    []
   );
 
   const computePlotDropTarget = useCallback(
     (absY: number): DropTarget | null => {
-      let insertIndex = plots.length;
-
       const sortedRects: Array<{ id: string; rect: LayoutRect }> = [];
       for (const [id, rect] of plotRects.current) {
         sortedRects.push({ id, rect });
       }
       sortedRects.sort((a, b) => a.rect.y - b.rect.y);
 
+      let insertIndex = sortedRects.length;
       for (let i = 0; i < sortedRects.length; i++) {
         const center = sortedRects[i].rect.y + sortedRects[i].rect.height / 2;
         if (absY < center) {
@@ -224,11 +223,29 @@ export function DragProvider({ children }: { children: ReactNode }) {
 
       return { type: 'plot', index: insertIndex };
     },
-    [plots]
+    []
+  );
+
+  const updateDropTarget = useCallback(
+    (type: 'beat' | 'chapter' | 'plot' | null, x: number, y: number) => {
+      let newTarget: DropTarget | null = null;
+      if (type === 'beat') {
+        newTarget = computeBeatDropTarget(x, y);
+      } else if (type === 'chapter') {
+        newTarget = computeChapterDropTarget(x);
+      } else if (type === 'plot') {
+        newTarget = computePlotDropTarget(y);
+      }
+      dropTargetRef.current = newTarget;
+      setDropTarget(newTarget);
+    },
+    [computeBeatDropTarget, computeChapterDropTarget, computePlotDropTarget]
   );
 
   const startDrag = useCallback(
     (type: 'beat' | 'chapter' | 'plot', id: string, content: any, x: number, y: number) => {
+      dragTypeRef.current = type;
+      dragIdRef.current = id;
       setDragType(type);
       setDragId(id);
       setDragContent(content);
@@ -236,72 +253,62 @@ export function DragProvider({ children }: { children: ReactNode }) {
       setDragY(y);
       setIsDragging(true);
       measureAll(type).then(() => {
-        if (type === 'beat') {
-          setDropTarget(computeBeatDropTarget(x, y));
-        } else if (type === 'chapter') {
-          setDropTarget(computeChapterDropTarget(x));
-        } else if (type === 'plot') {
-          setDropTarget(computePlotDropTarget(y));
-        }
+        updateDropTarget(type, x, y);
       });
     },
-    [measureAll, computeBeatDropTarget, computeChapterDropTarget, computePlotDropTarget]
+    [measureAll, updateDropTarget]
   );
 
   const updateDrag = useCallback(
     (x: number, y: number) => {
       setDragX(x);
       setDragY(y);
-      setDragType((currentType) => {
-        if (currentType === 'beat') {
-          setDropTarget(computeBeatDropTarget(x, y));
-        } else if (currentType === 'chapter') {
-          setDropTarget(computeChapterDropTarget(x));
-        } else if (currentType === 'plot') {
-          setDropTarget(computePlotDropTarget(y));
-        }
-        return currentType;
-      });
+      updateDropTarget(dragTypeRef.current, x, y);
     },
-    [computeBeatDropTarget, computeChapterDropTarget, computePlotDropTarget]
+    [updateDropTarget]
   );
 
   const endDrag = useCallback(() => {
-    setDragType((currentType) => {
-      setDragId((currentDragId) => {
-        setDropTarget((currentDropTarget) => {
-          if (currentType === 'beat' && currentDragId && currentDropTarget && currentDropTarget.chapterId && currentDropTarget.plotId) {
-            moveBeat(currentDragId, currentDropTarget.chapterId, currentDropTarget.plotId, currentDropTarget.index ?? 0);
-          } else if (currentType === 'chapter' && currentDragId && currentDropTarget) {
-            const publishedChs = chapters.filter((c) => c.status === 'published');
-            const without = publishedChs.filter((c) => c.id !== currentDragId);
-            const draggedCh = publishedChs.find((c) => c.id === currentDragId);
-            if (draggedCh) {
-              const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
-              without.splice(clamped, 0, draggedCh);
-              const draftChs = chapters.filter((c) => c.status === 'draft');
-              reorderChapters([...without, ...draftChs]);
-            }
-          } else if (currentType === 'plot' && currentDragId && currentDropTarget) {
-            const without = plots.filter((p) => p.id !== currentDragId);
-            const draggedPlot = plots.find((p) => p.id === currentDragId);
-            if (draggedPlot) {
-              const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
-              without.splice(clamped, 0, draggedPlot);
-              reorderPlots(without);
-            }
-          }
-          return null;
-        });
-        return null;
-      });
-      return null;
-    });
-    setDragContent(null);
+    const currentType = dragTypeRef.current;
+    const currentDragId = dragIdRef.current;
+    const currentDropTarget = dropTargetRef.current;
+
+    if (currentType === 'beat' && currentDragId && currentDropTarget && currentDropTarget.chapterId && currentDropTarget.plotId) {
+      moveBeat(currentDragId, currentDropTarget.chapterId, currentDropTarget.plotId, currentDropTarget.index ?? 0);
+    } else if (currentType === 'chapter' && currentDragId && currentDropTarget) {
+      const publishedChs = chapters.filter((c) => c.status === 'published');
+      const without = publishedChs.filter((c) => c.id !== currentDragId);
+      const draggedCh = publishedChs.find((c) => c.id === currentDragId);
+      if (draggedCh) {
+        const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
+        without.splice(clamped, 0, draggedCh);
+        const draftChs = chapters.filter((c) => c.status === 'draft');
+        reorderChapters([...without, ...draftChs]);
+      }
+    } else if (currentType === 'plot' && currentDragId && currentDropTarget) {
+      const without = plots.filter((p) => p.id !== currentDragId);
+      const draggedPlot = plots.find((p) => p.id === currentDragId);
+      if (draggedPlot) {
+        const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
+        without.splice(clamped, 0, draggedPlot);
+        reorderPlots(without);
+      }
+    }
+
+    dragTypeRef.current = null;
+    dragIdRef.current = null;
+    dropTargetRef.current = null;
     setIsDragging(false);
+    setDragType(null);
+    setDragId(null);
+    setDragContent(null);
+    setDropTarget(null);
   }, [moveBeat, reorderChapters, reorderPlots, chapters, plots]);
 
   const cancelDrag = useCallback(() => {
+    dragTypeRef.current = null;
+    dragIdRef.current = null;
+    dropTargetRef.current = null;
     setIsDragging(false);
     setDragType(null);
     setDragId(null);
