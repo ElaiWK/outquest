@@ -10,7 +10,6 @@ function generateId(): string {
 }
 
 function normalizeBeats(beats: Beat[]): Beat[] {
-  // Group by cell (chapterId + plotId), sort each group, reassign order 0,1,2...
   const groups = new Map<string, Beat[]>();
   for (const b of beats) {
     const key = `${b.chapterId}::${b.plotId}`;
@@ -131,7 +130,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     persist(t, chapters, plots, beats);
   };
 
-  // Chapter mutations
   const addChapter = () => {
     const id = generateId();
     const newChapter: Chapter = { id, title: 'New Chapter', status: 'published' };
@@ -148,7 +146,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
 
   const deleteChapter = (id: string) => {
     const updatedChapters = chapters.filter((c) => c.id !== id);
-    // Move beats from deleted chapter to inbox
     const updatedBeats = beats.map((b) =>
       b.chapterId === id ? { ...b, chapterId: 'inbox' } : b
     );
@@ -169,7 +166,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     const updatedChapters = chapters.map((c) =>
       c.id === id ? { ...c, status: 'published' as const } : c
     );
-    // Assign beats with plotId='inbox' in this chapter to first plot
     const firstPlot = plots[0];
     const updatedBeats = beats.map((b) =>
       b.chapterId === id && b.plotId === 'inbox' && firstPlot
@@ -181,7 +177,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     persist(title, updatedChapters, plots, updatedBeats);
   };
 
-  // Plot mutations
   const addPlot = () => {
     const id = generateId();
     const colorKeys = Object.keys(PLOT_COLORS) as ColorKey[];
@@ -200,7 +195,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
 
   const deletePlot = (id: string) => {
     const updatedPlots = plots.filter((p) => p.id !== id);
-    // Move beats from deleted plot to inbox plot
     const updatedBeats = beats.map((b) =>
       b.plotId === id ? { ...b, plotId: 'inbox' } : b
     );
@@ -209,7 +203,6 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     persist(title, chapters, updatedPlots, updatedBeats);
   };
 
-  // Beat mutations
   const addBeat = (chapterId: string, plotId: string): string => {
     const id = generateId();
     const cellBeats = beats.filter((b) => b.chapterId === chapterId && b.plotId === plotId);
@@ -239,26 +232,20 @@ export function ProjectProvider({ projectId, children }: { projectId: string; ch
     targetPlotId: string,
     targetIndex: number
   ) => {
-    // Remove beat from array
     const beat = beats.find((b) => b.id === beatId);
     if (!beat) return;
     let remaining = beats.filter((b) => b.id !== beatId);
 
-    // Set target
     const movedBeat = { ...beat, chapterId: targetChapterId, plotId: targetPlotId };
 
-    // Get target cell beats (already sorted)
     const targetCellBeats = remaining
       .filter((b) => b.chapterId === targetChapterId && b.plotId === targetPlotId)
       .sort((a, b) => a.order - b.order);
 
-    // Insert at targetIndex
     targetCellBeats.splice(targetIndex, 0, movedBeat);
 
-    // Reassign orders for target cell
     const targetCellUpdated = targetCellBeats.map((b, i) => ({ ...b, order: i }));
 
-    // Merge back
     const otherBeats = remaining.filter(
       (b) => !(b.chapterId === targetChapterId && b.plotId === targetPlotId)
     );

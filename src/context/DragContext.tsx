@@ -7,29 +7,38 @@ import React, {
   ReactNode,
 } from 'react';
 import { View } from 'react-native';
-import { Beat, Chapter, LayoutRect } from '../types';
-import { useBook } from './BookContext';
+import { useProject } from './ProjectContext';
 
-interface DropBeatTarget {
-  chapterId: string;
-  beatIndex: number;
+interface DropTarget {
+  type: 'beat' | 'cell' | 'chapter' | 'plot';
+  id?: string;
+  chapterId?: string;
+  plotId?: string;
+  index?: number;
+}
+
+interface LayoutRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface DragContextValue {
-  isDraggingBeat: boolean;
-  isDraggingChapter: boolean;
-  draggingBeat: Beat | null;
-  draggingChapter: Chapter | null;
+  isDragging: boolean;
+  dragType: 'beat' | 'chapter' | 'plot' | null;
+  dragId: string | null;
+  dragContent: any;
   dragX: number;
   dragY: number;
-  dropBeatTarget: DropBeatTarget | null;
-  dropChapterIndex: number | null;
+  dropTarget: DropTarget | null;
 
-  registerColumnRef: (chapterId: string, ref: View | null) => void;
+  registerCellRef: (chapterId: string, plotId: string, ref: View | null) => void;
   registerBeatRef: (beatId: string, ref: View | null) => void;
+  registerChapterRef: (chapterId: string, ref: View | null) => void;
+  registerPlotRef: (plotId: string, ref: View | null) => void;
 
-  startBeatDrag: (beat: Beat, x: number, y: number) => void;
-  startChapterDrag: (chapter: Chapter, x: number, y: number) => void;
+  startDrag: (type: 'beat' | 'chapter' | 'plot', id: string, content: any, x: number, y: number) => void;
   updateDrag: (x: number, y: number) => void;
   endDrag: () => void;
   cancelDrag: () => void;
@@ -38,25 +47,30 @@ interface DragContextValue {
 const DragContext = createContext<DragContextValue | null>(null);
 
 export function DragProvider({ children }: { children: ReactNode }) {
-  const { beats, chapters, moveBeat, reorderChapters } = useBook();
+  const { beats, chapters, plots, moveBeat, reorderChapters, reorderPlots } = useProject();
 
-  const [isDraggingBeat, setIsDraggingBeat] = useState(false);
-  const [isDraggingChapter, setIsDraggingChapter] = useState(false);
-  const [draggingBeat, setDraggingBeat] = useState<Beat | null>(null);
-  const [draggingChapter, setDraggingChapter] = useState<Chapter | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragType, setDragType] = useState<'beat' | 'chapter' | 'plot' | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragContent, setDragContent] = useState<any>(null);
   const [dragX, setDragX] = useState(0);
   const [dragY, setDragY] = useState(0);
-  const [dropBeatTarget, setDropBeatTarget] = useState<DropBeatTarget | null>(null);
-  const [dropChapterIndex, setDropChapterIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
-  const columnRefs = useRef(new Map<string, View>());
+  const cellRefs = useRef(new Map<string, View>());
   const beatRefs = useRef(new Map<string, View>());
-  const columnRects = useRef(new Map<string, LayoutRect>());
-  const beatRects = useRef(new Map<string, LayoutRect>());
+  const chapterRefs = useRef(new Map<string, View>());
+  const plotRefs = useRef(new Map<string, View>());
 
-  const registerColumnRef = useCallback((chapterId: string, ref: View | null) => {
-    if (ref) columnRefs.current.set(chapterId, ref);
-    else columnRefs.current.delete(chapterId);
+  const cellRects = useRef(new Map<string, LayoutRect>());
+  const beatRects = useRef(new Map<string, LayoutRect>());
+  const chapterRects = useRef(new Map<string, LayoutRect>());
+  const plotRects = useRef(new Map<string, LayoutRect>());
+
+  const registerCellRef = useCallback((chapterId: string, plotId: string, ref: View | null) => {
+    const key = `${chapterId}::${plotId}`;
+    if (ref) cellRefs.current.set(key, ref);
+    else cellRefs.current.delete(key);
   }, []);
 
   const registerBeatRef = useCallback((beatId: string, ref: View | null) => {
@@ -64,179 +78,252 @@ export function DragProvider({ children }: { children: ReactNode }) {
     else beatRefs.current.delete(beatId);
   }, []);
 
-  const measureAll = useCallback(async () => {
-    const measureView = (view: View): Promise<LayoutRect> =>
-      new Promise((resolve) => {
-        view.measureInWindow((x, y, width, height) => {
-          resolve({ x, y, width, height });
-        });
-      });
+  const registerChapterRef = useCallback((chapterId: string, ref: View | null) => {
+    if (ref) chapterRefs.current.set(chapterId, ref);
+    else chapterRefs.current.delete(chapterId);
+  }, []);
 
-    for (const [id, ref] of columnRefs.current) {
-      const rect = await measureView(ref);
-      columnRects.current.set(id, rect);
-    }
-    for (const [id, ref] of beatRefs.current) {
-      const rect = await measureView(ref);
-      beatRects.current.set(id, rect);
+  const registerPlotRef = useCallback((plotId: string, ref: View | null) => {
+    if (ref) plotRefs.current.set(plotId, ref);
+    else plotRefs.current.delete(plotId);
+  }, []);
+
+  const measureView = (view: View): Promise<LayoutRect> =>
+    new Promise((resolve) => {
+      view.measureInWindow((x, y, width, height) => {
+        resolve({ x, y, width, height });
+      });
+    });
+
+  const measureAll = useCallback(async (type: 'beat' | 'chapter' | 'plot') => {
+    if (type === 'beat') {
+      for (const [id, ref] of cellRefs.current) {
+        const rect = await measureView(ref);
+        cellRects.current.set(id, rect);
+      }
+      for (const [id, ref] of beatRefs.current) {
+        const rect = await measureView(ref);
+        beatRects.current.set(id, rect);
+      }
+    } else if (type === 'chapter') {
+      for (const [id, ref] of chapterRefs.current) {
+        const rect = await measureView(ref);
+        chapterRects.current.set(id, rect);
+      }
+    } else if (type === 'plot') {
+      for (const [id, ref] of plotRefs.current) {
+        const rect = await measureView(ref);
+        plotRects.current.set(id, rect);
+      }
     }
   }, []);
 
-  const computeDropBeatTarget = useCallback(
-    (absX: number, absY: number): DropBeatTarget | null => {
-      // Find target column
+  const computeBeatDropTarget = useCallback(
+    (absX: number, absY: number): DropTarget | null => {
+      // Find which cell we're over
       let targetChapterId: string | null = null;
-      let minDist = Infinity;
+      let targetPlotId: string | null = null;
 
-      for (const [chapterId, rect] of columnRects.current) {
-        if (absX >= rect.x && absX <= rect.x + rect.width) {
-          targetChapterId = chapterId;
+      for (const [key, rect] of cellRects.current) {
+        if (
+          absX >= rect.x &&
+          absX <= rect.x + rect.width &&
+          absY >= rect.y &&
+          absY <= rect.y + rect.height
+        ) {
+          const [cId, pId] = key.split('::');
+          targetChapterId = cId;
+          targetPlotId = pId;
           break;
-        }
-        const center = rect.x + rect.width / 2;
-        const dist = Math.abs(absX - center);
-        if (dist < minDist) {
-          minDist = dist;
-          targetChapterId = chapterId;
         }
       }
 
-      if (!targetChapterId) return null;
+      if (!targetChapterId || !targetPlotId) {
+        // Fall back to closest cell by x
+        let minDist = Infinity;
+        for (const [key, rect] of cellRects.current) {
+          const cx = rect.x + rect.width / 2;
+          const cy = rect.y + rect.height / 2;
+          const dist = Math.sqrt((absX - cx) ** 2 + (absY - cy) ** 2);
+          if (dist < minDist) {
+            minDist = dist;
+            const [cId, pId] = key.split('::');
+            targetChapterId = cId;
+            targetPlotId = pId;
+          }
+        }
+      }
 
-      // Find beat index in that column
-      const colBeats = beats
-        .filter((b) => b.chapterId === targetChapterId)
+      if (!targetChapterId || !targetPlotId) return null;
+
+      // Find beat index within that cell
+      const cellBeats = beats
+        .filter((b) => b.chapterId === targetChapterId && b.plotId === targetPlotId)
         .sort((a, b) => a.order - b.order);
 
-      let beatIndex = colBeats.length;
-      for (let i = 0; i < colBeats.length; i++) {
-        const rect = beatRects.current.get(colBeats[i].id);
+      let beatIndex = cellBeats.length;
+      for (let i = 0; i < cellBeats.length; i++) {
+        const rect = beatRects.current.get(cellBeats[i].id);
         if (rect && absY < rect.y + rect.height / 2) {
           beatIndex = i;
           break;
         }
       }
 
-      return { chapterId: targetChapterId, beatIndex };
+      return {
+        type: 'cell',
+        chapterId: targetChapterId,
+        plotId: targetPlotId,
+        index: beatIndex,
+      };
     },
     [beats]
   );
 
-  const computeDropChapterIndex = useCallback(
-    (absX: number): number => {
-      const sorted = [...chapters].sort((a, b) => a.order - b.order);
-      let idx = sorted.length;
-      let minDist = Infinity;
+  const computeChapterDropTarget = useCallback(
+    (absX: number): DropTarget | null => {
+      const publishedChs = chapters.filter((c) => c.status === 'published');
+      let insertIndex = publishedChs.length;
 
-      for (let i = 0; i < sorted.length; i++) {
-        const rect = columnRects.current.get(sorted[i].id);
-        if (!rect) continue;
-        const center = rect.x + rect.width / 2;
+      const sortedRects: Array<{ id: string; rect: LayoutRect }> = [];
+      for (const [id, rect] of chapterRects.current) {
+        sortedRects.push({ id, rect });
+      }
+      sortedRects.sort((a, b) => a.rect.x - b.rect.x);
+
+      for (let i = 0; i < sortedRects.length; i++) {
+        const center = sortedRects[i].rect.x + sortedRects[i].rect.width / 2;
         if (absX < center) {
-          idx = i;
+          insertIndex = i;
           break;
         }
       }
-      return idx;
+
+      return { type: 'chapter', index: insertIndex };
     },
     [chapters]
   );
 
-  const startBeatDrag = useCallback(
-    (beat: Beat, x: number, y: number) => {
-      setDraggingBeat(beat);
-      setDragX(x);
-      setDragY(y);
-      setIsDraggingBeat(true);
-      measureAll().then(() => {
-        setDropBeatTarget(computeDropBeatTarget(x, y));
-      });
+  const computePlotDropTarget = useCallback(
+    (absY: number): DropTarget | null => {
+      let insertIndex = plots.length;
+
+      const sortedRects: Array<{ id: string; rect: LayoutRect }> = [];
+      for (const [id, rect] of plotRects.current) {
+        sortedRects.push({ id, rect });
+      }
+      sortedRects.sort((a, b) => a.rect.y - b.rect.y);
+
+      for (let i = 0; i < sortedRects.length; i++) {
+        const center = sortedRects[i].rect.y + sortedRects[i].rect.height / 2;
+        if (absY < center) {
+          insertIndex = i;
+          break;
+        }
+      }
+
+      return { type: 'plot', index: insertIndex };
     },
-    [measureAll, computeDropBeatTarget]
+    [plots]
   );
 
-  const startChapterDrag = useCallback(
-    (chapter: Chapter, x: number, y: number) => {
-      setDraggingChapter(chapter);
+  const startDrag = useCallback(
+    (type: 'beat' | 'chapter' | 'plot', id: string, content: any, x: number, y: number) => {
+      setDragType(type);
+      setDragId(id);
+      setDragContent(content);
       setDragX(x);
       setDragY(y);
-      setIsDraggingChapter(true);
-      measureAll().then(() => {
-        setDropChapterIndex(computeDropChapterIndex(x));
+      setIsDragging(true);
+      measureAll(type).then(() => {
+        if (type === 'beat') {
+          setDropTarget(computeBeatDropTarget(x, y));
+        } else if (type === 'chapter') {
+          setDropTarget(computeChapterDropTarget(x));
+        } else if (type === 'plot') {
+          setDropTarget(computePlotDropTarget(y));
+        }
       });
     },
-    [measureAll, computeDropChapterIndex]
+    [measureAll, computeBeatDropTarget, computeChapterDropTarget, computePlotDropTarget]
   );
 
   const updateDrag = useCallback(
     (x: number, y: number) => {
       setDragX(x);
       setDragY(y);
-      if (isDraggingBeat) {
-        setDropBeatTarget(computeDropBeatTarget(x, y));
-      } else if (isDraggingChapter) {
-        setDropChapterIndex(computeDropChapterIndex(x));
-      }
+      setDragType((currentType) => {
+        if (currentType === 'beat') {
+          setDropTarget(computeBeatDropTarget(x, y));
+        } else if (currentType === 'chapter') {
+          setDropTarget(computeChapterDropTarget(x));
+        } else if (currentType === 'plot') {
+          setDropTarget(computePlotDropTarget(y));
+        }
+        return currentType;
+      });
     },
-    [isDraggingBeat, isDraggingChapter, computeDropBeatTarget, computeDropChapterIndex]
+    [computeBeatDropTarget, computeChapterDropTarget, computePlotDropTarget]
   );
 
   const endDrag = useCallback(() => {
-    if (isDraggingBeat && draggingBeat && dropBeatTarget) {
-      moveBeat(draggingBeat.id, dropBeatTarget.chapterId, dropBeatTarget.beatIndex);
-    }
-
-    if (isDraggingChapter && draggingChapter && dropChapterIndex !== null) {
-      const sorted = [...chapters].sort((a, b) => a.order - b.order);
-      const without = sorted.filter((c) => c.id !== draggingChapter.id);
-      const clamped = Math.max(0, Math.min(dropChapterIndex, without.length));
-      without.splice(clamped, 0, draggingChapter);
-      const reordered = without.map((c, i) => ({ ...c, order: i }));
-      reorderChapters(reordered);
-    }
-
-    setIsDraggingBeat(false);
-    setIsDraggingChapter(false);
-    setDraggingBeat(null);
-    setDraggingChapter(null);
-    setDropBeatTarget(null);
-    setDropChapterIndex(null);
-  }, [
-    isDraggingBeat,
-    isDraggingChapter,
-    draggingBeat,
-    draggingChapter,
-    dropBeatTarget,
-    dropChapterIndex,
-    moveBeat,
-    reorderChapters,
-    chapters,
-  ]);
+    setDragType((currentType) => {
+      setDragId((currentDragId) => {
+        setDropTarget((currentDropTarget) => {
+          if (currentType === 'beat' && currentDragId && currentDropTarget && currentDropTarget.chapterId && currentDropTarget.plotId) {
+            moveBeat(currentDragId, currentDropTarget.chapterId, currentDropTarget.plotId, currentDropTarget.index ?? 0);
+          } else if (currentType === 'chapter' && currentDragId && currentDropTarget) {
+            const publishedChs = chapters.filter((c) => c.status === 'published');
+            const without = publishedChs.filter((c) => c.id !== currentDragId);
+            const draggedCh = publishedChs.find((c) => c.id === currentDragId);
+            if (draggedCh) {
+              const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
+              without.splice(clamped, 0, draggedCh);
+              const draftChs = chapters.filter((c) => c.status === 'draft');
+              reorderChapters([...without, ...draftChs]);
+            }
+          } else if (currentType === 'plot' && currentDragId && currentDropTarget) {
+            const without = plots.filter((p) => p.id !== currentDragId);
+            const draggedPlot = plots.find((p) => p.id === currentDragId);
+            if (draggedPlot) {
+              const clamped = Math.max(0, Math.min(currentDropTarget.index ?? 0, without.length));
+              without.splice(clamped, 0, draggedPlot);
+              reorderPlots(without);
+            }
+          }
+          return null;
+        });
+        return null;
+      });
+      return null;
+    });
+    setDragContent(null);
+    setIsDragging(false);
+  }, [moveBeat, reorderChapters, reorderPlots, chapters, plots]);
 
   const cancelDrag = useCallback(() => {
-    setIsDraggingBeat(false);
-    setIsDraggingChapter(false);
-    setDraggingBeat(null);
-    setDraggingChapter(null);
-    setDropBeatTarget(null);
-    setDropChapterIndex(null);
+    setIsDragging(false);
+    setDragType(null);
+    setDragId(null);
+    setDragContent(null);
+    setDropTarget(null);
   }, []);
 
   return (
     <DragContext.Provider
       value={{
-        isDraggingBeat,
-        isDraggingChapter,
-        draggingBeat,
-        draggingChapter,
+        isDragging,
+        dragType,
+        dragId,
+        dragContent,
         dragX,
         dragY,
-        dropBeatTarget,
-        dropChapterIndex,
-        registerColumnRef,
+        dropTarget,
+        registerCellRef,
         registerBeatRef,
-        startBeatDrag,
-        startChapterDrag,
+        registerChapterRef,
+        registerPlotRef,
+        startDrag,
         updateDrag,
         endDrag,
         cancelDrag,

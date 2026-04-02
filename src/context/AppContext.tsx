@@ -85,7 +85,6 @@ export function useApp(): AppContextValue {
 }
 
 export function updateProjectInStorage(projectId: string, updater: (p: Project) => Project): void {
-  // Helper called by ProjectContext to persist project changes
   AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
     try {
       const projects: Project[] = raw ? JSON.parse(raw) : [];
