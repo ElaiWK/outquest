@@ -1,26 +1,27 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   ScrollView,
   Pressable,
   StyleSheet,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  TextInput,
 } from 'react-native';
 import { useProject } from '../context/ProjectContext';
 import { useDrag } from '../context/DragContext';
 import BeatCard from '../components/BeatCard';
-import { PLOT_COLORS, CELL_WIDTH, CELL_HEIGHT, ColorKey } from '../constants';
-
-const CHAPTER_LABEL_HEIGHT = 56;
-const PLOT_HEADER_WIDTH = 140;
+import { PLOT_COLORS, ColorKey } from '../constants';
 
 interface Props {
   scale: number;
   onEditBeat: (beatId: string) => void;
   onEditPlot: (plotId: string) => void;
 }
+
+const ROW_LABEL  = 80;   // chapter label column width
+const COL_CELL   = 240;  // plot column width
+const COL_HEAD   = 56;   // plot header height
+const ROW_CELL   = 160;  // chapter row height
 
 export default function VerticalView({ scale, onEditBeat, onEditPlot }: Props) {
   const {
@@ -29,221 +30,197 @@ export default function VerticalView({ scale, onEditBeat, onEditPlot }: Props) {
     getBeatsForCell,
     addBeat,
     updateChapter,
+    deleteChapter,
   } = useProject();
 
-  const { registerCellRef, isDragging, dropTarget, dragType } = useDrag();
-
-  const colScrollRefs = useRef<(ScrollView | null)[]>([]);
-  const headerScrollRef = useRef<ScrollView>(null);
-  const isSyncing = useRef(false);
-
-  const syncScroll = (x: number) => {
-    if (isSyncing.current) return;
-    isSyncing.current = true;
-    headerScrollRef.current?.scrollTo({ x, animated: false });
-    colScrollRefs.current.forEach((ref) => ref?.scrollTo({ x, animated: false }));
-    setTimeout(() => { isSyncing.current = false; }, 50);
-  };
-
-  const handleColScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    syncScroll(e.nativeEvent.contentOffset.x);
-  };
+  const { registerCellRef, registerChapterRef, registerPlotRef, startDrag, isDragging, dragType, dropTarget } = useDrag();
 
   return (
-    <View style={styles.container}>
-      {/* Plot headers row (fixed at top, scrolls horizontally) */}
-      <View style={styles.topRow}>
-        {/* Corner */}
-        <View style={[styles.cornerCell, { width: PLOT_HEADER_WIDTH }]} />
-        <ScrollView
-          ref={headerScrollRef}
-          horizontal
-          scrollEnabled={false}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.plotHeadersContent}
-        >
-          {filteredPlots.map((plot) => {
-            const colorKey = plot.color as ColorKey;
-            const colors = PLOT_COLORS[colorKey] ?? PLOT_COLORS.yellow;
+    <ScrollView style={styles.outer} showsVerticalScrollIndicator={false}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={[styles.grid, { zoom: scale } as any]}>
+
+          {/* ── Header row: corner + plot column headers ── */}
+          <View style={styles.headerRow}>
+            <View style={[styles.corner, { width: ROW_LABEL, height: COL_HEAD }]} />
+
+            {filteredPlots.map((plot, plotIdx) => {
+              const colorKey = plot.color as ColorKey;
+              const colors = PLOT_COLORS[colorKey] ?? PLOT_COLORS.yellow;
+              const isDropHere = dragType === 'plot' && dropTarget?.type === 'plot' && dropTarget?.index === plotIdx;
+              return (
+                <React.Fragment key={plot.id}>
+                  {isDropHere && <View style={[styles.plotDropLine, { height: COL_HEAD }]} />}
+                  <Pressable
+                    ref={(r) => registerPlotRef(plot.id, r as any)}
+                    style={[styles.plotHeader, { width: COL_CELL, height: COL_HEAD, borderBottomColor: colors.text }]}
+                    onPress={() => onEditPlot(plot.id)}
+                    onLongPress={() => startDrag('plot', plot.id, plot, 0, 0)}
+                    delayLongPress={350}
+                  >
+                    <Text style={styles.plotTrackLabel}>Track</Text>
+                    <View style={styles.plotHeaderTitle}>
+                      <View style={[styles.plotDot, { backgroundColor: colors.bg }]} />
+                      <Text style={[styles.plotTitle, { color: colors.text }]} numberOfLines={1}>{plot.title}</Text>
+                    </View>
+                  </Pressable>
+                </React.Fragment>
+              );
+            })}
+          </View>
+
+          {/* ── Chapter rows ── */}
+          {publishedChapters.map((chapter, idx) => {
+            const isChapterDrop = dragType === 'chapter' && dropTarget?.type === 'chapter' && dropTarget?.index === idx;
             return (
-              <View
-                key={plot.id}
-                style={[
-                  styles.plotHeader,
-                  {
-                    width: CELL_WIDTH * scale,
-                    borderBottomColor: colors.text,
-                  },
-                ]}
-              >
-                <View style={[styles.plotColorDot, { backgroundColor: colors.bg }]} />
-                <Text style={styles.plotHeaderText} numberOfLines={1}>
-                  {plot.title}
-                </Text>
-                <Pressable onPress={() => onEditPlot(plot.id)} style={styles.gearBtn}>
-                  <Text style={styles.gearBtnText}>⚙</Text>
-                </Pressable>
-              </View>
+              <React.Fragment key={chapter.id}>
+                {isChapterDrop && <View style={styles.chapterDropLine} />}
+                <View style={styles.dataRow}>
+                  {/* Chapter label */}
+                  <Pressable
+                    ref={(r) => registerChapterRef(chapter.id, r as any)}
+                    style={[styles.chapterLabel, { width: ROW_LABEL, height: ROW_CELL }]}
+                    onLongPress={() => startDrag('chapter', chapter.id, chapter, 0, 0)}
+                    delayLongPress={350}
+                  >
+                    <Text style={styles.chapterNum}>Ch.{idx + 1}</Text>
+                    <TextInput
+                      style={styles.chapterTitle}
+                      value={chapter.title}
+                      onChangeText={(t) => updateChapter(chapter.id, t)}
+                      numberOfLines={3}
+                      multiline
+                    />
+                  </Pressable>
+
+                  {/* Cells */}
+                  {filteredPlots.map((plot) => {
+                    const colorKey = plot.color as ColorKey;
+                    const colors = PLOT_COLORS[colorKey] ?? PLOT_COLORS.yellow;
+                    const cellBeats = getBeatsForCell(chapter.id, plot.id);
+                    const isCellDrop =
+                      dragType === 'beat' &&
+                      dropTarget?.type === 'cell' &&
+                      dropTarget?.chapterId === chapter.id &&
+                      dropTarget?.plotId === plot.id;
+
+                    return (
+                      <View
+                        key={plot.id}
+                        ref={(r) => registerCellRef(chapter.id, plot.id, r)}
+                        style={[
+                          styles.cell,
+                          {
+                            width: COL_CELL,
+                            height: ROW_CELL,
+                            backgroundColor: isCellDrop ? colors.dim : '#18181f',
+                            borderColor: isCellDrop ? colors.text : '#2a2a35',
+                            borderWidth: isCellDrop ? 2 : 1,
+                          },
+                        ]}
+                      >
+                        <View style={[styles.cellLine, { backgroundColor: colors.text + '22' }]} />
+                        <ScrollView
+                          showsVerticalScrollIndicator={false}
+                          scrollEnabled={!isDragging}
+                          style={styles.cellScroll}
+                        >
+                          {cellBeats.map((beat) => (
+                            <BeatCard
+                              key={beat.id}
+                              beat={beat}
+                              plot={plot}
+                              onPress={() => onEditBeat(beat.id)}
+                            />
+                          ))}
+                          <Pressable
+                            style={styles.addBeatBtn}
+                            onPress={() => onEditBeat(addBeat(chapter.id, plot.id))}
+                          >
+                            <Text style={styles.addBeatBtnText}>+ scene</Text>
+                          </Pressable>
+                        </ScrollView>
+                      </View>
+                    );
+                  })}
+                </View>
+              </React.Fragment>
             );
           })}
-        </ScrollView>
-      </View>
 
-      {/* Chapter rows */}
-      <ScrollView style={styles.chapterRows} showsVerticalScrollIndicator={false}>
-        {publishedChapters.map((chapter, chIdx) => (
-          <View key={chapter.id} style={styles.chapterRow}>
-            {/* Chapter label (fixed left) */}
-            <View style={[styles.chapterLabel, { width: PLOT_HEADER_WIDTH }]}>
-              <Text style={styles.chapterLabelText} numberOfLines={3}>
-                {chapter.title}
-              </Text>
-            </View>
-
-            {/* Cells */}
-            <ScrollView
-              ref={(r) => { colScrollRefs.current[chIdx] = r; }}
-              horizontal
-              scrollEnabled={!isDragging}
-              onScroll={handleColScroll}
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.cellsRowContent}
-            >
-              {filteredPlots.map((plot) => {
-                const cellBeats = getBeatsForCell(chapter.id, plot.id);
-                const colorKey = plot.color as ColorKey;
-                const colors = PLOT_COLORS[colorKey] ?? PLOT_COLORS.yellow;
-                const isCellDropTarget =
-                  dragType === 'beat' &&
-                  dropTarget?.type === 'cell' &&
-                  dropTarget?.chapterId === chapter.id &&
-                  dropTarget?.plotId === plot.id;
-
-                return (
-                  <View
-                    key={plot.id}
-                    ref={(r) => registerCellRef(chapter.id, plot.id, r)}
-                    style={[
-                      styles.cell,
-                      {
-                        width: CELL_WIDTH * scale,
-                        minHeight: CELL_HEIGHT * scale,
-                        backgroundColor: isCellDropTarget ? colors.dim : '#18181f',
-                        borderColor: isCellDropTarget ? colors.text : '#2a2a35',
-                        borderWidth: isCellDropTarget ? 2 : 1,
-                      },
-                    ]}
-                  >
-                    {cellBeats.map((beat) => (
-                      <BeatCard
-                        key={beat.id}
-                        beat={beat}
-                        plot={plot}
-                        onPress={() => onEditBeat(beat.id)}
-                      />
-                    ))}
-                    <Pressable
-                      style={styles.addBeatBtn}
-                      onPress={() => onEditBeat(addBeat(chapter.id, plot.id))}
-                    >
-                      <Text style={styles.addBeatBtnText}>+ scene</Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ))}
+        </View>
       </ScrollView>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f0f13',
-  },
-  topRow: {
+  outer: { flex: 1, backgroundColor: '#0f0f13' },
+  grid:  { flexDirection: 'column' },
+
+  headerRow: {
     flexDirection: 'row',
+    backgroundColor: '#13131a',
     borderBottomWidth: 1,
     borderBottomColor: '#2a2a35',
-    backgroundColor: '#13131a',
-    zIndex: 10,
   },
-  cornerCell: {
+  corner: {
     borderRightWidth: 1,
     borderRightColor: '#2a2a35',
-  },
-  plotHeadersContent: {
-    alignItems: 'stretch',
   },
   plotHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingBottom: 10,
     borderRightWidth: 1,
     borderRightColor: '#2a2a35',
-    borderBottomWidth: 3,
-    gap: 8,
+    borderBottomWidth: 2,
+    gap: 4,
   },
-  plotColorDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    flexShrink: 0,
-  },
-  plotHeaderText: {
-    color: '#ccccdd',
-    fontSize: 13,
-    fontWeight: '600',
-    flex: 1,
-  },
-  gearBtn: {
-    padding: 4,
-  },
-  gearBtnText: {
-    color: '#666677',
-    fontSize: 13,
-  },
-  chapterRows: {
-    flex: 1,
-  },
-  chapterRow: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a35',
-  },
+  plotTrackLabel: { color: '#444455', fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1 },
+  plotHeaderTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  plotDot: { width: 8, height: 8, borderRadius: 4 },
+  plotTitle: { fontSize: 14, fontWeight: '700' },
+
+  plotDropLine: { width: 3, backgroundColor: '#eab308', borderRadius: 2 },
+  chapterDropLine: { height: 3, backgroundColor: '#eab308', borderRadius: 2, marginHorizontal: 8 },
+
+  dataRow: { flexDirection: 'row' },
+
   chapterLabel: {
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
     borderRightWidth: 1,
     borderRightColor: '#2a2a35',
-    backgroundColor: '#13131a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a35',
+    borderLeftWidth: 3,
+    borderLeftColor: '#eab308',
+    gap: 4,
   },
-  chapterLabelText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  cellsRowContent: {
-    alignItems: 'stretch',
-  },
+  chapterNum: { color: '#eab308', fontSize: 9, fontWeight: '700', textTransform: 'uppercase' },
+  chapterTitle: { color: '#ffffff', fontSize: 12, fontWeight: '600', padding: 0, margin: 0 },
+
   cell: {
     borderRightWidth: 1,
-    borderColor: '#2a2a35',
-    padding: 4,
+    borderBottomWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
   },
+  cellLine: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '50%',
+    width: 2,
+  },
+  cellScroll: { flex: 1, padding: 6 },
+
   addBeatBtn: {
-    paddingVertical: 6,
+    paddingVertical: 8,
     alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#2a2a35',
   },
-  addBeatBtnText: {
-    color: '#555566',
-    fontSize: 11,
-    fontWeight: '500',
-  },
+  addBeatBtnText: { color: '#444455', fontSize: 11 },
 });
